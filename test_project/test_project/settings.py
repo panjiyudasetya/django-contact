@@ -25,7 +25,9 @@ SECRET_KEY = 'django-insecure-wf_r-@dl4firanp6xn*y^97(n^!^#4rf2%6m+x2515d%8+7^0+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    '0.0.0.0'
+]
 
 
 # Application definition
@@ -37,6 +39,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    # Add `django_contact` package
+    'django_contact',
 ]
 
 MIDDLEWARE = [
