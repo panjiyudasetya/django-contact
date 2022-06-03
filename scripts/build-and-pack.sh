@@ -20,11 +20,11 @@ function build_code_distribution {
 
 
 function install_package_locally {
-    clean_code_dist
-
     echo "Uninstalling \"django_contact\"..."
     yes | pip uninstall django-contact
 
     echo "Installing \"django_contact\" to the \"test_project\"..."
     python setup.py install
+
+    clean_code_dist
 }

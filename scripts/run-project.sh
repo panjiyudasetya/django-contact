@@ -1,20 +1,21 @@
 #!/bin/bash
 
-. scripts/build-and-pack.sh
+function setup_environment {
+    . scripts/.env.sh
+    . scripts/build-and-pack.sh
 
-function activate_virtual_env {
     source ./.venv/bin/activate
 }
 
-function run_on_port {
-    PORT=$1
+function run_project {
     cd test_project
     pip install -r requirements.txt
-    python manage.py runserver "0.0.0.0:${PORT}"
+
+    python manage.py runserver "${SERVER}:${PORT}"
 }
 
 
 # Main
-activate_virtual_env
+setup_environment
 install_package_locally
-run_on_port "1234"
+run_project
