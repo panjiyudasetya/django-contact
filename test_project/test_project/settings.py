@@ -40,7 +40,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django_extensions',
-
+    # Authentication dependency app
+    'rest_framework_simplejwt.token_blacklist',
+    # Add internal apps
+    'test_auth.apps.TestAuthConfig',
     # Add `django_contact` package
     'django_contact',
 ]
