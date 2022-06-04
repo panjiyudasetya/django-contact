@@ -29,18 +29,19 @@ class BaseContactView(GenericAPIView):
 
     def get_queryset(self):
         """
-        Return queryset that contains Contact instances
+        Return queryset that contains `Contact` instances
         with prefetched phone numbers.
         """
         prefetch_phone_numbers = Prefetch(
             'phone_numbers',
             Phone.objects.all().annotate(is_primary=F('contactphone__is_primary'))
         )
-        return Contact.objects.all().prefetch_related(prefetch_phone_numbers)\
+        return Contact.objects.all()\
+            .prefetch_related(prefetch_phone_numbers)\
             .order_by('id')
 
 
-class ContactView(BaseContactView, ListAPIView, CreateAPIView):
+class ContactListView(BaseContactView, ListAPIView, CreateAPIView):
     """
     Interface:
     - `GET /contacts/`: Get contact list.
@@ -82,7 +83,12 @@ class ContactView(BaseContactView, ListAPIView, CreateAPIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class ContactDetailView(BaseContactView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
+class ContactDetailView(
+    BaseContactView,
+    RetrieveAPIView,
+    UpdateAPIView,
+    DestroyAPIView
+):
     """
     Interface:
     - `GET /contacts/{pk}/`: Retrieve contact with specific ID.
@@ -145,10 +151,15 @@ class BaseContactOfContactView(GenericAPIView):
 
         return contact.contacts.all()\
             .prefetch_related(prefetch_phone_numbers)\
-            .annotate(starred=F('contactmembership__starred'))
+            .annotate(starred=F('contactmembership__starred'))\
+            .order_by('id')
 
 
-class ContactOfContactListView(BaseContactOfContactView, ListAPIView, CreateAPIView):
+class ContactOfContactListView(
+    BaseContactOfContactView,
+    ListAPIView,
+    CreateAPIView
+):
     """
     Interface:
     - `GET /contacts/{contact_id}/contact-list/`: Get contact list
@@ -200,7 +211,11 @@ class ContactOfContactListView(BaseContactOfContactView, ListAPIView, CreateAPIV
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class ContactOfContactDetailView(BaseContactOfContactView, RetrieveAPIView, DestroyAPIView):
+class ContactOfContactDetailView(
+    BaseContactOfContactView,
+    RetrieveAPIView,
+    DestroyAPIView
+):
     """
     Interface:
     - `GET /contacts/{contact_id}/contact-list/{pk}/`: Retrieve contact
@@ -232,3 +247,103 @@ class ContactOfContactDetailView(BaseContactOfContactView, RetrieveAPIView, Dest
 
         contact.contacts.remove(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class BaseContactPhoneNumberView(GenericAPIView):
+
+    def get_queryset(self):
+        """
+        Narrows down `self` queryset to the `Contact` instances
+        that belongs to the specific contact.
+        """
+        try:
+            contact = Contact.objects.get(id=self.kwargs['contact_id'])
+        except Contact.DoesNotExist:
+            raise Http404
+
+        return contact.phone_numbers.all()\
+            .annotate(is_primary=F('contactphone__is_primary'))
+
+
+class ContactPhoneNumberListView(
+    BaseContactPhoneNumberView,
+    CreateAPIView
+):
+    """
+    Interface:
+    - `POST /contacts/{contact_id}/phone-numbers/`: Create a new phone number
+      for the given contact ID.
+    """
+    serializer_class = PhoneSerializer
+    deserializer_class = PhoneDeserializer
+
+    def create(self, request, *args, **kwargs):
+        """
+        We override this mixin class's method to make use appropriate serializer
+        for validating and deserializing input, and for serializing output.
+        """
+        try:
+            contact = Contact.objects.get(id=self.kwargs['contact_id'])
+        except Contact.DoesNotExist:
+            raise Http404
+
+        deserializer = self.deserializer_class(data=request.data)
+        deserializer.context.update({'contact': contact})
+        deserializer.is_valid(raise_exception=True)
+        deserializer.save()
+
+        serializer = self.serializer_class(
+            # Repopulate preselected data
+            # of that newly created phone number.
+            self.get_queryset().get(id=deserializer.instance.id)
+        )
+        headers = self.get_success_headers(serializer.data)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class ContactPhoneNumberDetailView(
+    BaseContactPhoneNumberView,
+    UpdateAPIView,
+    DestroyAPIView
+):
+    """
+    Interface:
+    - `PUT /contacts/{contact_id}/phone-numbers/{pk}/`: Update phone number
+      of the given contact ID.
+
+    - `DELETE /contacts/{contact_id}/phone-numbers/{pk}/`: Delete phone number
+      from the given contact ID.
+    """
+    serializer_class = PhoneSerializer
+    deserializer_class = PhoneDeserializer
+
+    def update(self, request, *args, **kwargs):
+        """
+        We override this mixin class's method to make use appropriate serializer
+        for validating and deserializing input, and for serializing output.
+        """
+        try:
+            contact = Contact.objects.get(id=self.kwargs['contact_id'])
+        except Contact.DoesNotExist:
+            raise Http404
+
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        deserializer = self.deserializer_class(instance, data=request.data, partial=partial)
+        deserializer.context.update({'contact': contact})
+        deserializer.is_valid(raise_exception=True)
+        deserializer.save()
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            instance._prefetched_objects_cache = {}
+
+        serializer = self.serializer_class(
+            # Repopulate preselected data
+            # of that newly created phone number.
+            self.get_queryset().get(id=deserializer.instance.id)
+        )
+        return Response(serializer.data)
