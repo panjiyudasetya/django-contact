@@ -1,21 +1,24 @@
 from django.urls import path
 
 from django_contact.views import (
-    AllContactView,
-    ContactListView,
-    ContactListDetailView
+    ContactView,
+    ContactDetailView,
+    ContactOfContactListView,
+    ContactOfContactDetailView
 )
 
 urlpatterns = [
     path('contacts/',
-         AllContactView.as_view(),
+         ContactView.as_view(),
          name='contacts'),
+    path('contacts/<int:pk>/',
+         ContactDetailView.as_view(),
+         name='contacts-detail'),
 
-    path('contacts/<int:id>/contacts/',
-         ContactListView.as_view(),
+    path('contacts/<int:contact_id>/contact-list/',
+         ContactOfContactListView.as_view(),
          name='contacts-of-contact'),
-
-    path('contacts/<int:id>/contacts/<int:contact_id>/',
-         ContactListDetailView.as_view(),
+    path('contacts/<int:contact_id>/contact-list/<int:pk>/',
+         ContactOfContactDetailView.as_view(),
          name='contacts-of-contact-detail'),
 ]

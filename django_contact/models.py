@@ -101,7 +101,7 @@ class ContactPhone(models.Model):
                 'Contact ID {} has primary phone already.'.format(self.contact_id)
             )
 
-    def _has_primary_phone(self):
+    def _has_primary_phone(self) -> bool:
         """
         Return `True` if the `self.contact` has primary phone already.
         """
