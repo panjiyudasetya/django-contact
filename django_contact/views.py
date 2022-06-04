@@ -1,5 +1,5 @@
 from django.http import Http404
-from django.db.models import F, Prefetch
+from django.db.models import F, Q, Prefetch
 from rest_framework import status
 from rest_framework.generics import (
     CreateAPIView,
@@ -13,7 +13,8 @@ from rest_framework.response import Response
 
 from django_contact.models import (
     Contact,
-    Phone
+    Phone,
+    Group
 )
 from django_contact.serializers import (
     ContactSerializer,
@@ -21,7 +22,11 @@ from django_contact.serializers import (
     ContactOfContactSerializer,
     ContactOfContactDeserializer,
     PhoneSerializer,
-    PhoneDeserializer
+    PhoneDeserializer,
+    GroupSerializer,
+    GroupDeserializer,
+    GroupMembershipSerializer,
+    GroupMembershipDeserializer,
 )
 
 
@@ -55,14 +60,15 @@ class ContactListView(BaseContactView, ListAPIView, CreateAPIView):
         We override this mixin class's method to use the serializer
         for serializing output.
         """
+        context = self.get_serializer_context()
         queryset = self.filter_queryset(self.get_queryset())
 
         page = self.paginate_queryset(queryset)
         if page is not None:
-            serializer = self.serializer_class(page, many=True)
+            serializer = self.serializer_class(page, many=True, context=context)
             return self.get_paginated_response(serializer.data)
 
-        serializer = self.serializer_class(queryset, many=True)
+        serializer = self.serializer_class(queryset, many=True, context=context)
         return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
@@ -70,13 +76,16 @@ class ContactListView(BaseContactView, ListAPIView, CreateAPIView):
         We override this mixin class's method to make use appropriate serializer
         for validating and deserializing input, and for serializing output.
         """
-        deserializer = self.deserializer_class(data=request.data)
+        context = self.get_serializer_context()
+
+        deserializer = self.deserializer_class(data=request.data, context=context)
         deserializer.is_valid(raise_exception=True)
         deserializer.save()
 
         serializer = self.serializer_class(
             # Repopulate prefetched data of that newly created contact.
-            self.get_queryset().get(id=deserializer.instance.id)
+            self.get_queryset().get(id=deserializer.instance.id),
+            context=context
         )
         headers = self.get_success_headers(serializer.data)
 
@@ -104,7 +113,7 @@ class ContactDetailView(
         for serializing output.
         """
         instance = self.get_object()
-        serializer = self.serializer_class(instance)
+        serializer = self.serializer_class(instance, context=self.get_serializer_context())
         return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
@@ -112,10 +121,11 @@ class ContactDetailView(
         We override this mixin class's method to make use appropriate serializer
         for validating and deserializing input, and for serializing output.
         """
+        context = self.get_serializer_context()
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
 
-        deserializer = self.deserializer_class(instance, data=request.data, partial=partial)
+        deserializer = self.deserializer_class(instance, data=request.data, partial=partial, context=context)
         deserializer.is_valid(raise_exception=True)
         deserializer.save()
 
@@ -126,7 +136,8 @@ class ContactDetailView(
 
         serializer = self.serializer_class(
             # Repopulate prefetched data of that updated contact.
-            self.get_queryset().get(id=deserializer.instance.id)
+            self.get_queryset().get(id=deserializer.instance.id),
+            context=context
         )
         return Response(serializer.data)
 
@@ -176,14 +187,15 @@ class ContactOfContactListView(
         We override this mixin class's method to use the serializer
         for serializing output.
         """
+        context = self.get_serializer_context()
         queryset = self.filter_queryset(self.get_queryset())
 
         page = self.paginate_queryset(queryset)
         if page is not None:
-            serializer = self.serializer_class(page, many=True)
+            serializer = self.serializer_class(page, many=True, context=context)
             return self.get_paginated_response(serializer.data)
 
-        serializer = self.serializer_class(queryset, many=True)
+        serializer = self.serializer_class(queryset, many=True, context=context)
         return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
@@ -196,15 +208,18 @@ class ContactOfContactListView(
         except Contact.DoesNotExist:
             raise Http404
 
-        deserializer = self.deserializer_class(data=request.data)
-        deserializer.context.update({'contact': contact})
+        context = self.get_serializer_context()
+        context.update({'contact': contact})
+
+        deserializer = self.deserializer_class(data=request.data, context=context)
         deserializer.is_valid(raise_exception=True)
         deserializer.save()
 
         serializer = self.serializer_class(
             # Repopulate prefetched and preselected data
             # of that newly created contact.
-            self.get_queryset().get(id=deserializer.instance.id)
+            self.get_queryset().get(id=deserializer.instance.id),
+            context=context
         )
         headers = self.get_success_headers(serializer.data)
 
@@ -232,7 +247,7 @@ class ContactOfContactDetailView(
         for serializing output.
         """
         instance = self.get_object()
-        serializer = self.serializer_class(instance)
+        serializer = self.serializer_class(instance, context=self.get_serializer_context())
         return Response(serializer.data)
 
     def perform_destroy(self, instance):
@@ -287,15 +302,18 @@ class ContactPhoneNumberListView(
         except Contact.DoesNotExist:
             raise Http404
 
-        deserializer = self.deserializer_class(data=request.data)
-        deserializer.context.update({'contact': contact})
+        context = self.get_serializer_context()
+        context.update({'contact': contact})
+
+        deserializer = self.deserializer_class(data=request.data, context=context)
         deserializer.is_valid(raise_exception=True)
         deserializer.save()
 
         serializer = self.serializer_class(
             # Repopulate preselected data
             # of that newly created phone number.
-            self.get_queryset().get(id=deserializer.instance.id)
+            self.get_queryset().get(id=deserializer.instance.id),
+            context=context
         )
         headers = self.get_success_headers(serializer.data)
 
@@ -328,11 +346,13 @@ class ContactPhoneNumberDetailView(
         except Contact.DoesNotExist:
             raise Http404
 
+        context = self.get_serializer_context()
+        context.update({'contact': contact})
+
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
 
-        deserializer = self.deserializer_class(instance, data=request.data, partial=partial)
-        deserializer.context.update({'contact': contact})
+        deserializer = self.deserializer_class(instance, data=request.data, partial=partial, context=context)
         deserializer.is_valid(raise_exception=True)
         deserializer.save()
 
@@ -344,6 +364,122 @@ class ContactPhoneNumberDetailView(
         serializer = self.serializer_class(
             # Repopulate preselected data
             # of that newly created phone number.
-            self.get_queryset().get(id=deserializer.instance.id)
+            self.get_queryset().get(id=deserializer.instance.id),
+            context=context
         )
         return Response(serializer.data)
+
+
+class BaseContactGroupView(GenericAPIView):
+
+    def get_queryset(self):
+        """
+        Returns union of `Group` instances:
+        - Groups created by the requester.
+        - Groups where the requester is a member of.
+        """
+        # TODO: Change the `Group.created_by` field's type with foreign key to `Contact` instead of user
+        # TODO: Change the `Group.updated_by` field's type with foreign key to `Contact` instead of user
+        return Group.objects.filter(
+            Q(created_by=self.request.user) | Q(contactgroup__contact__user=self.request.user)
+        ).distinct().order_by('id')
+
+
+class GroupListView(
+    BaseContactGroupView,
+    ListAPIView,
+    CreateAPIView
+):
+    """
+    Interface:
+    - `GET /groups/`: Get contact groups that can be accessed by the requester.
+    - `POST /groups/`: Create a new contact group.
+    """
+    serializer_class = GroupSerializer
+    deserializer_class = GroupDeserializer
+
+    def list(self, request, *args, **kwargs):
+        """
+        We override this mixin class's method to use the serializer
+        for serializing output.
+        """
+        context = self.get_serializer_context()
+        queryset = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.serializer_class(page, many=True, context=context)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.serializer_class(queryset, many=True, context=context)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        """
+        We override this mixin class's method to make use appropriate serializer
+        for validating and deserializing input, and for serializing output.
+        """
+        context = self.get_serializer_context()
+
+        deserializer = self.deserializer_class(data=request.data, context=context)
+        deserializer.is_valid(raise_exception=True)
+        deserializer.save()
+
+        serializer = self.serializer_class(deserializer.instance, context=context)
+        headers = self.get_success_headers(serializer.data)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class GroupDetailView(
+    BaseContactGroupView,
+    RetrieveAPIView,
+    UpdateAPIView,
+    DestroyAPIView
+):
+    """
+    Interface:
+    - `GET /groups/{pk}/`: Retrieve contact group with specific ID.
+    - `PUT /groups/{pk}/`: Update contact group with specific ID.
+    - `DELETE /groups/{pk}/`: Delete contact group with specific ID.
+    """
+    serializer_class = GroupSerializer
+    deserializer_class = GroupDeserializer
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        We override this mixin class's method to use the serializer
+        for serializing output.
+        """
+        instance = self.get_object()
+        serializer = self.serializer_class(instance, context=self.get_serializer_context())
+        return Response(serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        """
+        We override this mixin class's method to make use appropriate serializer
+        for validating and deserializing input, and for serializing output.
+        """
+        context = self.get_serializer_context()
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        deserializer = self.deserializer_class(instance, data=request.data, partial=partial, context=context)
+        deserializer.is_valid(raise_exception=True)
+        deserializer.save()
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            instance._prefetched_objects_cache = {}
+
+        serializer = self.serializer_class(deserializer.instance, context=context)
+        return Response(serializer.data)
+
+
+class GroupMembershipView(GenericAPIView):
+    pass
+
+
+class GroupMembershipDetailView(GenericAPIView):
+    pass

@@ -9,7 +9,8 @@ from typing import Dict, List
 from django_contact.models import (
     Contact,
     Phone,
-    ContactPhone
+    ContactPhone,
+    Group
 )
 
 
@@ -223,3 +224,52 @@ class PhoneDeserializer(serializers.ModelSerializer):
             ).clean()
         except DjangoValidationError as err:
             raise ValidationError(detail=as_serializer_error(err))
+
+
+class GroupSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Group
+        fields = (
+            'id',
+            'name',
+            'description',
+            'created_by',
+            'created_at',
+            'updated_by',
+            'updated_at',
+        )
+        read_only_fields = fields
+
+
+class GroupDeserializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Group
+        fields = (
+            'name',
+            'description',
+        )
+
+    def save(self, **kwargs):
+        """
+        We override this method to set the `Group.created_by`
+        and `Group.updated_by` fields.
+        """
+        user = self.context['request'].user
+
+        # If update
+        if self.instance:
+            return super().save(updated_by=user)
+
+        # If create
+        return super().save(created_by=user)
+
+
+
+class GroupMembershipSerializer(serializers.ModelSerializer):
+    pass
+
+
+class GroupMembershipDeserializer(serializers.ModelSerializer):
+    pass
