@@ -40,7 +40,7 @@ class ContactSerializer(serializers.ModelSerializer):
         ]
 
 
-class ContactListDetailSerializer(serializers.ModelSerializer):
+class ContactDetailSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
     email = serializers.EmailField(source='user.email')
