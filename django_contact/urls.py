@@ -9,8 +9,8 @@ from django_contact.views import (
     ContactOfContactDetailView,
     GroupListView,
     GroupDetailView,
-    GroupMembershipView,
-    GroupMembershipDetailView
+    ContactGroupView,
+    ContactGroupDetailView
 )
 
 urlpatterns = [
@@ -28,10 +28,10 @@ urlpatterns = [
          ContactPhoneNumberDetailView.as_view(),
          name='contacts-detail'),
 
-    path('contacts/<int:contact_id>/contact-list/',
+    path('contacts/<int:contact_id>/contacts/',
          ContactOfContactListView.as_view(),
          name='contacts-of-contact'),
-    path('contacts/<int:contact_id>/contact-list/<int:pk>/',
+    path('contacts/<int:contact_id>/contacts/<int:pk>/',
          ContactOfContactDetailView.as_view(),
          name='contacts-of-contact-detail'),
 
@@ -42,10 +42,10 @@ urlpatterns = [
          GroupDetailView.as_view(),
          name='groups-detail'),
 
-    path('groups/<int:group_id>/members/',
-         GroupMembershipView.as_view(),
-         name='groups-members'),
-    path('groups/<int:group_id>/members/<int:pk>/',
-         GroupMembershipDetailView.as_view(),
-         name='groups-members-detail'),
+    path('groups/<int:group_id>/contacts/',
+         ContactGroupView.as_view(),
+         name='groups-contacts'),
+    path('groups/<int:group_id>/contacts/<int:pk>/',
+         ContactGroupDetailView.as_view(),
+         name='groups-contacts-detail'),
 ]

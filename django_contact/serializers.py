@@ -10,7 +10,8 @@ from django_contact.models import (
     Contact,
     Phone,
     ContactPhone,
-    Group
+    Group,
+    ContactGroup
 )
 
 
@@ -40,14 +41,14 @@ class ContactSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_phone_numbers(self, obj):
+    def get_phone_numbers(self, obj) -> List[Dict]:
         # Assuming that `obj` comes with
         # prefetched `phone_numbers` attribute
         return [
             {
+                'id': p.id,
                 'phone_number': {
-                    'id': p.id,
-                    'number': p.phone_number.national_number,
+                    'value': p.phone_number.national_number,
                     'country_code': p.phone_number.country_code,
                     'country_code_source': p.phone_number.country_code_source
                 },
@@ -76,7 +77,7 @@ class ContactDeserializer(serializers.ModelSerializer):
             'address',
         )
 
-    def update(self, instance, validated_data):
+    def update(self, instance, validated_data) -> Contact:
         # The `user` field should never be modified on update
         # Therefore, we need to remove it from the `validated_data` object
         validated_data.pop('user', None)
@@ -88,7 +89,8 @@ class ContactOfContactSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source='user.last_name')
     email = serializers.EmailField(source='user.email')
     phone_numbers = serializers.SerializerMethodField()
-    starred = serializers.SerializerMethodField()
+    # Assuming the `serializer.instance` comes with preselected `starred` field
+    starred = serializers.BooleanField()
 
     class Meta:
         model = Contact
@@ -113,9 +115,9 @@ class ContactOfContactSerializer(serializers.ModelSerializer):
         # prefetched `phone_numbers` attribute
         return [
             {
+                'id': p.id,
                 'phone_number': {
-                    'id': p.id,
-                    'number': p.phone_number.national_number,
+                    'value': p.phone_number.national_number,
                     'country_code': p.phone_number.country_code,
                     'country_code_source': p.phone_number.country_code_source
                 },
@@ -126,11 +128,6 @@ class ContactOfContactSerializer(serializers.ModelSerializer):
             }
             for p in obj._prefetched_objects_cache['phone_numbers']
         ]
-
-    def get_starred(self, obj) -> bool:
-        # Assuming that `obj` comes with
-        # preselected `starred` attribute
-        return obj.starred
 
 
 class ContactOfContactDeserializer(serializers.Serializer):
@@ -143,7 +140,7 @@ class ContactOfContactDeserializer(serializers.Serializer):
         fields = ('contact', 'starred',)
 
     @transaction.atomic
-    def create(self, validated_data):
+    def create(self, validated_data) -> Contact:
         new_contact = validated_data.get('contact')
         starred = validated_data.get('starred')
 
@@ -151,15 +148,13 @@ class ContactOfContactDeserializer(serializers.Serializer):
         contact = self.context.get('contact')
         contact.contacts.add(new_contact, through_defaults={'starred': starred})
 
-        # Set contact favorite indicator as the contact's attribute
-        setattr(new_contact, 'starred', starred)
-
         return new_contact
 
 
 class PhoneSerializer(serializers.ModelSerializer):
     phone_number = serializers.SerializerMethodField()
-    is_primary = serializers.SerializerMethodField()
+    # Assuming the `serializer.instance` comes with preselected `is_primary` field
+    is_primary = serializers.BooleanField()
 
     class Meta:
         model = Phone
@@ -171,16 +166,12 @@ class PhoneSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_phone_number(self, obj):
+    def get_phone_number(self, obj) -> Dict:
         return {
             'number': obj.phone_number.national_number,
             'country_code': obj.phone_number.country_code,
             'country_code_source': obj.phone_number.country_code_source
         }
-
-    def get_is_primary(self, obj):
-        # Assuming that `obj` comes with `is_primary` attribute
-        return obj.is_primary
 
 
 class PhoneDeserializer(serializers.ModelSerializer):
@@ -266,10 +257,102 @@ class GroupDeserializer(serializers.ModelSerializer):
         return super().save(created_by=user)
 
 
+class ContactGroupSerializer(serializers.ModelSerializer):
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    email = serializers.EmailField(source='user.email')
+    phone_numbers = serializers.SerializerMethodField()
+    # Assuming the `serializer.instance` comes with preselected `role` field
+    role = serializers.CharField()
+    # Assuming the `serializer.instance` comes with preselected `invited_by` field
+    invited_by = serializers.IntegerField()
+    # Assuming the `serializer.instance` comes with preselected `joined_at` field
+    joined_at = serializers.DateTimeField()
 
-class GroupMembershipSerializer(serializers.ModelSerializer):
-    pass
+    class Meta:
+        model = Contact
+        fields = (
+            'id',
+            'first_name',
+            'last_name',
+            'nickname',
+            'email',
+            'company',
+            'title',
+            'phone_numbers',
+            'address',
+            'created_at',
+            'updated_at',
+            'role',
+            'invited_by',
+            'joined_at',
+        )
+        read_only_fields = fields
+
+    def get_phone_numbers(self, obj) -> List[Dict]:
+        # Assuming that `obj` comes with
+        # prefetched `phone_numbers` attribute
+        return [
+            {
+                'id': p.id,
+                'phone_number': {
+                    'value': p.phone_number.national_number,
+                    'country_code': p.phone_number.country_code,
+                    'country_code_source': p.phone_number.country_code_source
+                },
+                'type': p.phone_type,
+                'is_primary': p.is_primary,
+                'created_at': p.created_at,
+                'updated_at': p.updated_at
+            }
+            for p in obj._prefetched_objects_cache['phone_numbers']
+        ]
 
 
-class GroupMembershipDeserializer(serializers.ModelSerializer):
-    pass
+class ContactGroupDeserializer(serializers.Serializer):
+    contact = serializers.PrimaryKeyRelatedField(
+        queryset=Contact.objects.all()
+    )
+    role = serializers.ChoiceField(
+        choices=ContactGroup.ROLE_CHOICES
+    )
+    inviter = serializers.PrimaryKeyRelatedField(
+        queryset=Contact.objects.all()
+    )
+
+    class Meta:
+        fields = (
+            'contact',
+            'role',
+            'inviter',
+        )
+
+    @transaction.atomic
+    def create(self, validated_data) -> Contact:
+        # Preventive action
+        # The `contact` field should never be modified on update
+        contact = self.instance if self.instance else validated_data.get('contact')
+
+        role = validated_data.get('role')
+        inviter = validated_data.get('inviter')
+
+        # Assuming the serializer's context comes with the `group` object
+        group = self.context.get('group')
+
+        # If update
+        if self.instance:
+            # (`contact`, `inviter`) fields should never be modified on update
+            ContactGroup.objects.filter(
+                contact=contact,
+                group=group
+            ).update(role=role)
+        # If create
+        else:
+            ContactGroup.objects.create(
+                contact=contact,
+                group=group,
+                role=role,
+                inviter=inviter
+            )
+
+        return contact
