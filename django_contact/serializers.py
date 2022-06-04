@@ -186,25 +186,27 @@ class PhoneDeserializer(serializers.ModelSerializer):
         )
 
     @transaction.atomic
-    def save(self, **kwargs) -> None:
+    def save(self, **kwargs) -> Phone:
         """
         We override this method to update or create `ContactPhone` object
         associated with the `Contact` and `Phone` instances.
         """
         is_primary = self.validated_data.pop('is_primary')
-        super().save(**kwargs)
+        instance = super().save(**kwargs)
 
         # Assuming the serializer's context comes with the `contact` object
         contact = self.context.get('contact')
-        self._validate_contact_phone(contact, self.instance, is_primary)
+        self._validate_contact_phone(contact, instance, is_primary)
 
         # Update or create the `Phone` instance
         # that belongs to the `contact` object
         ContactPhone.objects.update_or_create(
             contact=contact,
-            phone=self.instance,
+            phone=instance,
             defaults={'is_primary': is_primary}
         )
+
+        return instance
 
     def _validate_contact_phone(self, contact, phone, is_primary) -> None:
         try:
@@ -242,19 +244,28 @@ class GroupDeserializer(serializers.ModelSerializer):
             'description',
         )
 
-    def save(self, **kwargs):
+    @transaction.atomic
+    def save(self, **kwargs) -> Group:
         """
-        We override this method to set the `Group.created_by`
-        and `Group.updated_by` fields.
+        We override this method to set the (`Group.created_by`, `Group.updated_by`) fields
+        accordingly and add the group's creator as the group admin.
         """
-        user = self.context['request'].user
+        contact = self.context['request'].user.contact
 
         # If update
         if self.instance:
-            return super().save(updated_by=user)
-
+            instance = super().save(updated_by=contact)
         # If create
-        return super().save(created_by=user)
+        else:
+            instance = super().save(created_by=contact)
+
+        # Add group's creator as an admin on that group
+        instance.contacts.add(
+            contact,
+            through_defaults={'role': ContactGroup.ROLE_ADMIN, 'inviter': contact}
+        )
+
+        return instance
 
 
 class ContactGroupSerializer(serializers.ModelSerializer):
@@ -329,30 +340,23 @@ class ContactGroupDeserializer(serializers.Serializer):
 
     @transaction.atomic
     def create(self, validated_data) -> Contact:
-        # Preventive action
-        # The `contact` field should never be modified on update
-        contact = self.instance if self.instance else validated_data.get('contact')
-
+        contact = validated_data.get('contact')
         role = validated_data.get('role')
         inviter = validated_data.get('inviter')
 
         # Assuming the serializer's context comes with the `group` object
         group = self.context.get('group')
-
-        # If update
-        if self.instance:
-            # (`contact`, `inviter`) fields should never be modified on update
-            ContactGroup.objects.filter(
-                contact=contact,
-                group=group
-            ).update(role=role)
-        # If create
-        else:
-            ContactGroup.objects.create(
-                contact=contact,
-                group=group,
-                role=role,
-                inviter=inviter
-            )
+        group.contacts.add(contact, through_defaults={'role': role, 'inviter': inviter})
 
         return contact
+
+    def update(self, instance, validated_data):
+        # Preventive action (`contact`, `inviter`) fields
+        # should never be modified on update
+        role = validated_data.get('role')
+
+        # Assuming the serializer's context comes with the `group` object
+        group = self.context.get('group')
+        ContactGroup.objects.filter(contact=instance, group=group).update(role=role)
+
+        return instance

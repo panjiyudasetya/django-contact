@@ -378,10 +378,13 @@ class BaseContactGroupView(GenericAPIView):
         - Groups created by the requester.
         - Groups where the requester is a member of.
         """
-        # TODO: Change the `Group.created_by` field's type with foreign key to `Contact` instead of user
-        # TODO: Change the `Group.updated_by` field's type with foreign key to `Contact` instead of user
+        try:
+            contact = Contact.objects.get(user=self.request.user)
+        except Contact.DoesNotExist:
+            raise Http404
+
         return Group.objects.filter(
-            Q(created_by=self.request.user) | Q(contactgroup__contact__user=self.request.user)
+            Q(created_by=contact) | Q(contactgroup__contact=contact)
         ).distinct().order_by('id')
 
 
@@ -485,11 +488,14 @@ class BaseContactGroupView(GenericAPIView):
         - Groups created by the requester.
         - Groups where the requester is a contact of.
         """
-        # TODO: Change the `Group.created_by` field's type with foreign key to `Contact` instead of user
-        # TODO: Change the `Group.updated_by` field's type with foreign key to `Contact` instead of user
+        try:
+            contact = Contact.objects.get(user=self.request.user)
+        except Contact.DoesNotExist:
+            raise Http404
+
         return Group.objects.filter(
-            Q(created_by=self.request.user) | Q(contactgroup__contact__user=self.request.user)
-        )
+            Q(created_by=contact) | Q(contactgroup__contact=contact)
+        ).distinct().order_by('id')
 
     def get_contacts_of(self, group):
         """
@@ -528,7 +534,7 @@ class ContactGroupView(
         groups = super().get_queryset()
         try:
             group = groups.get(id=self.kwargs['group_id'])
-        except Contact.DoesNotExist:
+        except Group.DoesNotExist:
             raise Http404
 
         return self.get_contacts_of(group)
@@ -637,7 +643,11 @@ class ContactGroupDetailView(
             # forcibly invalidate the prefetch cache on the instance.
             instance._prefetched_objects_cache = {}
 
-        serializer = self.serializer_class(deserializer.instance, context=context)
+        serializer = self.serializer_class(
+            # Repopulate prefetched data of that newly added contact.
+            self.get_queryset().get(id=deserializer.instance.id),
+            context=context
+        )
         return Response(serializer.data)
 
     def perform_destroy(self, instance):
