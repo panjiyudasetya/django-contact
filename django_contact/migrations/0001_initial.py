@@ -53,13 +53,13 @@ class Migration(migrations.Migration):
             name='Group',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=128, unique=True)),
+                ('name', models.CharField(max_length=128)),
                 ('description', models.CharField(blank=True, max_length=256)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('contacts', models.ManyToManyField(through='django_contact.ContactGroup', to='django_contact.Contact')),
-                ('created_by', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
-                ('updated_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='groups_as_updater', to=settings.AUTH_USER_MODEL)),
+                ('created_by', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='groups_as_creator', to='django_contact.contact')),
+                ('updated_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='groups_as_updater', to='django_contact.contact')),
             ],
         ),
         migrations.CreateModel(
@@ -107,5 +107,9 @@ class Migration(migrations.Migration):
             model_name='contact',
             name='user',
             field=models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL),
+        ),
+        migrations.AlterUniqueTogether(
+            name='contactgroup',
+            unique_together={('contact', 'group')},
         ),
     ]

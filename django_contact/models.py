@@ -112,21 +112,19 @@ class ContactPhone(models.Model):
 
 
 class Group(models.Model):
-    name = models.CharField(
-        max_length=128,
-        unique=True
-    )
+    name = models.CharField(max_length=128)
     description = models.CharField(
         max_length=256,
         blank=True
     )
     created_by = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE
+        Contact,
+        on_delete=models.CASCADE,
+        related_name='groups_as_creator'
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_by = models.ForeignKey(
-        User,
+        Contact,
         null=True,
         on_delete=models.SET_NULL,
         related_name='groups_as_updater'
@@ -188,3 +186,8 @@ class ContactGroup(models.Model):
         related_name='contactgroups_as_inviter'
     )
     joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = (
+            ('contact', 'group'),
+        )
