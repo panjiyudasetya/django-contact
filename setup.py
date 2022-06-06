@@ -26,6 +26,7 @@ setuptools.setup(
         'django',
         'djangorestframework',
         'django-phonenumber-field',
+        'drf-rw-serializers',
         'phonenumbers'
     ]
 )

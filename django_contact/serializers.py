@@ -42,8 +42,16 @@ class ContactSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_phone_numbers(self, obj) -> List[Dict]:
-        # Assuming that `obj` comes with
-        # prefetched `phone_numbers` attribute
+        # When that `obj` comes with prefetched `phone_numbers`, use it.
+        if hasattr(obj, '_prefetched_objects_cache'):
+            phone_numbers = obj._prefetched_objects_cache.get('phone_numbers', [])
+
+        # Otherwise, select it from DB.
+        # Please be carefull with this, it can cause the endpoint performance
+        # extremely slow, because each object will execute 1 DB lookup query.
+        else:
+            phone_numbers = obj.phone_numbers.all().annotate_is_primary()
+
         return [
             {
                 'id': p.id,
@@ -57,13 +65,12 @@ class ContactSerializer(serializers.ModelSerializer):
                 'created_at': p.created_at,
                 'updated_at': p.updated_at
             }
-            for p in obj._prefetched_objects_cache['phone_numbers']
+            for p in phone_numbers
         ]
 
 
 class ContactDeserializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(
-        required=False,
         queryset=User.objects.all()
     )
 
@@ -77,78 +84,15 @@ class ContactDeserializer(serializers.ModelSerializer):
             'address',
         )
 
+    def validate_user(self, value):
+        if Contact.objects.filter(user=value).exists():
+            raise ValidationError('Has a contact list already.')
+
     def update(self, instance, validated_data) -> Contact:
         # The `user` field should never be modified on update
         # Therefore, we need to remove it from the `validated_data` object
         validated_data.pop('user', None)
         return super().update(instance, validated_data)
-
-
-class ContactOfContactSerializer(serializers.ModelSerializer):
-    first_name = serializers.CharField(source='user.first_name')
-    last_name = serializers.CharField(source='user.last_name')
-    email = serializers.EmailField(source='user.email')
-    phone_numbers = serializers.SerializerMethodField()
-    # Assuming the `serializer.instance` comes with preselected `starred` field
-    starred = serializers.BooleanField()
-
-    class Meta:
-        model = Contact
-        fields = (
-            'id',
-            'first_name',
-            'last_name',
-            'nickname',
-            'email',
-            'company',
-            'title',
-            'phone_numbers',
-            'address',
-            'created_at',
-            'updated_at',
-            'starred',
-        )
-        read_only_fields = fields
-
-    def get_phone_numbers(self, obj) -> List[Dict]:
-        # Assuming that `obj` comes with
-        # prefetched `phone_numbers` attribute
-        return [
-            {
-                'id': p.id,
-                'phone_number': {
-                    'value': p.phone_number.national_number,
-                    'country_code': p.phone_number.country_code,
-                    'country_code_source': p.phone_number.country_code_source
-                },
-                'type': p.phone_type,
-                'is_primary': p.is_primary,
-                'created_at': p.created_at,
-                'updated_at': p.updated_at
-            }
-            for p in obj._prefetched_objects_cache['phone_numbers']
-        ]
-
-
-class ContactOfContactDeserializer(serializers.Serializer):
-    contact = serializers.PrimaryKeyRelatedField(
-        queryset=Contact.objects.all()
-    )
-    starred = serializers.BooleanField(default=False)
-
-    class Meta:
-        fields = ('contact', 'starred',)
-
-    @transaction.atomic
-    def create(self, validated_data) -> Contact:
-        new_contact = validated_data.get('contact')
-        starred = validated_data.get('starred')
-
-        # Assuming the serializer's context comes with the `contact` object
-        contact = self.context.get('contact')
-        contact.contacts.add(new_contact, through_defaults={'starred': starred})
-
-        return new_contact
 
 
 class PhoneSerializer(serializers.ModelSerializer):
@@ -206,6 +150,8 @@ class PhoneDeserializer(serializers.ModelSerializer):
             defaults={'is_primary': is_primary}
         )
 
+        # Attach the `is_primary` value to the `self` instance
+        setattr(instance, 'is_primary', is_primary)
         return instance
 
     def _validate_contact_phone(self, contact, phone, is_primary) -> None:
@@ -217,6 +163,81 @@ class PhoneDeserializer(serializers.ModelSerializer):
             ).clean()
         except DjangoValidationError as err:
             raise ValidationError(detail=as_serializer_error(err))
+
+
+class ContactOfContactSerializer(serializers.ModelSerializer):
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    email = serializers.EmailField(source='user.email')
+    phone_numbers = serializers.SerializerMethodField()
+    # Assuming the `serializer.instance` comes with preselected `starred` field
+    starred = serializers.BooleanField()
+
+    class Meta:
+        model = Contact
+        fields = (
+            'id',
+            'first_name',
+            'last_name',
+            'nickname',
+            'email',
+            'company',
+            'title',
+            'phone_numbers',
+            'address',
+            'created_at',
+            'updated_at',
+            'starred',
+        )
+        read_only_fields = fields
+
+    def get_phone_numbers(self, obj) -> List[Dict]:
+        # When that `obj` comes with prefetched `phone_numbers`, use it.
+        if hasattr(obj, '_prefetched_objects_cache'):
+            phone_numbers = obj._prefetched_objects_cache.get('phone_numbers', [])
+
+        # Otherwise, select it from DB.
+        # Please be carefull with this, it can cause the endpoint performance
+        # extremely slow, because each object will execute 1 DB lookup query.
+        else:
+            phone_numbers = obj.phone_numbers.all().annotate_is_primary()
+
+        return [
+            {
+                'id': p.id,
+                'phone_number': {
+                    'value': p.phone_number.national_number,
+                    'country_code': p.phone_number.country_code,
+                    'country_code_source': p.phone_number.country_code_source
+                },
+                'type': p.phone_type,
+                'is_primary': p.is_primary,
+                'created_at': p.created_at,
+                'updated_at': p.updated_at
+            }
+            for p in phone_numbers
+        ]
+
+
+class ContactOfContactDeserializer(serializers.Serializer):
+    contact = serializers.PrimaryKeyRelatedField(
+        queryset=Contact.objects.all()
+    )
+    starred = serializers.BooleanField(default=False)
+
+    class Meta:
+        fields = ('contact', 'starred',)
+
+    @transaction.atomic
+    def create(self, validated_data) -> Contact:
+        new_contact = validated_data.get('contact')
+        starred = validated_data.get('starred')
+
+        # Assuming the serializer's context comes with the `contact` object
+        contact = self.context.get('contact')
+        contact.contacts.add(new_contact, through_defaults={'starred': starred})
+
+        return new_contact
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -244,6 +265,17 @@ class GroupDeserializer(serializers.ModelSerializer):
             'description',
         )
 
+    def validate(self, attrs):
+        user = self.context['request'].user
+
+        # Ensures the requester has a contact list
+        if not Contact.objects.filter(user=user).exists():
+            raise ValidationError(
+                'You don\'t have a contact list yet. Please create a new one.'
+            )
+
+        return super().validate(attrs)
+
     @transaction.atomic
     def save(self, **kwargs) -> Group:
         """
@@ -259,7 +291,7 @@ class GroupDeserializer(serializers.ModelSerializer):
         else:
             instance = super().save(created_by=contact)
 
-        # Add group's creator as an admin on that group
+        # Add group's creator as an admin of that group
         instance.contacts.add(
             contact,
             through_defaults={'role': ContactGroup.ROLE_ADMIN, 'inviter': contact}
@@ -301,8 +333,16 @@ class ContactGroupSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_phone_numbers(self, obj) -> List[Dict]:
-        # Assuming that `obj` comes with
-        # prefetched `phone_numbers` attribute
+        # When that `obj` comes with prefetched `phone_numbers`, use it.
+        if hasattr(obj, '_prefetched_objects_cache'):
+            phone_numbers = obj._prefetched_objects_cache.get('phone_numbers', [])
+
+        # Otherwise, select it from DB.
+        # Please be carefull with this, it can cause the endpoint performance
+        # extremely slow, because each object will execute 1 DB lookup query.
+        else:
+            phone_numbers = obj.phone_numbers.all().annotate_is_primary()
+
         return [
             {
                 'id': p.id,
@@ -316,7 +356,7 @@ class ContactGroupSerializer(serializers.ModelSerializer):
                 'created_at': p.created_at,
                 'updated_at': p.updated_at
             }
-            for p in obj._prefetched_objects_cache['phone_numbers']
+            for p in phone_numbers
         ]
 
 
@@ -348,7 +388,7 @@ class ContactGroupDeserializer(serializers.Serializer):
         group = self.context.get('group')
         group.contacts.add(contact, through_defaults={'role': role, 'inviter': inviter})
 
-        return contact
+        return group.get_contacts().get(id=contact.id)
 
     def update(self, instance, validated_data):
         # Preventive action (`contact`, `inviter`) fields
@@ -359,4 +399,4 @@ class ContactGroupDeserializer(serializers.Serializer):
         group = self.context.get('group')
         ContactGroup.objects.filter(contact=instance, group=group).update(role=role)
 
-        return instance
+        return group.get_contacts().get(id=instance.id)
