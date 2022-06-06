@@ -1,10 +1,21 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q, F, Prefetch
 from phonenumber_field.modelfields import PhoneNumberField
 
 
 User = get_user_model()
+
+
+class PhoneQuerySet(models.QuerySet):
+
+    def annotate_is_primary(self) -> models.QuerySet['Phone']:
+        """
+        This method annotates the `self` queryset with the `is_primary` attribute
+        taken from the `ContactPhone`.
+        """
+        return self.annotate(starred=F('contactphone__is_primary'))
 
 
 class Phone(models.Model):
@@ -25,10 +36,32 @@ class Phone(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = PhoneQuerySet.as_manager()
+
     class Meta:
         unique_together = (
             ('phone_number', 'phone_type'),
         )
+
+
+class ContactQuerySet(models.QuerySet):
+
+    def prefetch_phone_numbers(self) -> models.QuerySet['Contact']:
+        """
+        This method prefetches the `self` queryset with `phone_numbers` attribute.
+        """
+        prefetch_phone_numbers = Prefetch(
+            'phone_numbers',
+            Phone.objects.all().annotate(is_primary=F('contactphone__is_primary'))
+        )
+        return self.prefetch_related(prefetch_phone_numbers)
+
+    def annotate_starred(self) -> models.QuerySet['Contact']:
+        """
+        This method annotates the `self` queryset with the `starred` attribute
+        taken from the `ContactMembership`.
+        """
+        return self.annotate(starred=F('contactmembership__starred'))
 
 
 class Contact(models.Model):
@@ -64,6 +97,8 @@ class Contact(models.Model):
         through='ContactMembership',
         through_fields=('owner', 'contact')
     )
+
+    objects = ContactQuerySet.as_manager()
 
 
 class ContactMembership(models.Model):
@@ -111,6 +146,19 @@ class ContactPhone(models.Model):
         ).exists()
 
 
+class GroupQuerySet(models.QuerySet):
+
+    def accessible_for(self, contact) -> models.QuerySet['Group']:
+        """
+        This method narrows down the `self` queryset to the union of:
+        - Groups created by the contact.
+        - Groups where the contact is a member of.
+        """
+        return self.filter(
+            Q(created_by=contact) | Q(contactgroup__contact=contact)
+        ).distinct()
+
+
 class Group(models.Model):
     name = models.CharField(max_length=128)
     description = models.CharField(
@@ -136,6 +184,8 @@ class Group(models.Model):
         through_fields=('group', 'contact'),
     )
 
+    objects = GroupQuerySet.as_manager()
+
     def is_group_admin(self, contact) -> bool:
         """
         Return `True` if the given `contact` is the admin
@@ -156,6 +206,20 @@ class Group(models.Model):
             group=self,
             contact=contact
         ).exists()
+
+    def get_contacts(self) -> models.QuerySet['Contact']:
+        """
+        Returns `Contact` instances that are currenlty member of the `self` instance
+        with annotated (`role`, `inviter`, `joined_at`).
+
+        Those annotated attributes are taken from the `ContactGroup`.
+        """
+
+        return self.contacts.all().prefetch_phone_numbers()\
+            .annotate(role=F('contactgroup__role'))\
+            .annotate(invited_by=F('contactgroup__inviter'))\
+            .annotate(joined_at=F('contactgroup__joined_at'))\
+            .order_by('id').distinct()
 
 
 class ContactGroup(models.Model):
