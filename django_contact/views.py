@@ -42,6 +42,7 @@ class ContactListView(
     - `GET /contacts/`: Get contact list.
     - `POST /contacts/`: Create a new contact.
     """
+    pass
 
 
 class ContactDetailView(
@@ -56,6 +57,7 @@ class ContactDetailView(
     - `PUT /contacts/{pk}/`: Update contact with specific ID.
     - `DELETE /contacts/{pk}/`: Delete contact with specific ID.
     """
+    pass
 
 
 class BaseContactPhoneNumberView(rw_generics.GenericAPIView):
@@ -101,6 +103,7 @@ class ContactPhoneNumberListView(
     - `POST /contacts/{contact_id}/phone-numbers/`:
       Create a new phone number for the given contact ID.
     """
+    pass
 
 
 class ContactPhoneNumberDetailView(
@@ -116,6 +119,7 @@ class ContactPhoneNumberDetailView(
     - `DELETE /contacts/{contact_id}/phone-numbers/{pk}/`:
       Delete phone number from the given contact ID.
     """
+    pass
 
 
 class BaseContactOfContactView(rw_generics.GenericAPIView):
@@ -166,6 +170,7 @@ class ContactOfContactListView(
     - `POST /contacts/{contact_id}/contact-list/`:
       Create a new contact in the contact list of the given contact ID.
     """
+    pass
 
 
 class ContactOfContactDetailView(
@@ -223,6 +228,7 @@ class GroupListView(
     - `GET /groups/`: Get contact groups that are accessible for the requester.
     - `POST /groups/`: Create a new contact group.
     """
+    pass
 
 
 class GroupDetailView(
@@ -237,6 +243,7 @@ class GroupDetailView(
     - `PUT /groups/{pk}/`: Update contact group with specific ID.
     - `DELETE /groups/{pk}/`: Delete contact group with specific ID.
     """
+    pass
 
 
 class BaseContactGroupView(rw_generics.GenericAPIView):
@@ -294,6 +301,7 @@ class ContactGroupView(
     - `GET /groups/{group_id}/contacts/`: Get contact list from the given group ID.
     - `POST /groups/{group_id}/contacts/`: Add contact to the given contact group ID.
     """
+    pass
 
 
 class ContactGroupDetailView(

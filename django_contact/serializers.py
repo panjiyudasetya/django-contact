@@ -71,7 +71,8 @@ class ContactSerializer(serializers.ModelSerializer):
 
 class ContactDeserializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all()
+        queryset=User.objects.all(),
+        required=False
     )
 
     class Meta:
@@ -86,7 +87,20 @@ class ContactDeserializer(serializers.ModelSerializer):
 
     def validate_user(self, value):
         if Contact.objects.filter(user=value).exists():
-            raise ValidationError('Has a contact list already.')
+            raise ValidationError(
+                'User ID {} has a contact list already.'.format(value.id),
+                code='invalid'
+            )
+        return value
+
+    def validate(self, attrs):
+        # Checks on create
+        if not self.instance and not attrs.get('user'):
+            raise ValidationError(
+                {'user': 'This field is required'},
+                code='required'
+            )
+        return super().validate(attrs)
 
     def update(self, instance, validated_data) -> Contact:
         # The `user` field should never be modified on update
@@ -136,23 +150,24 @@ class PhoneDeserializer(serializers.ModelSerializer):
         associated with the `Contact` and `Phone` instances.
         """
         is_primary = self.validated_data.pop('is_primary')
-        instance = super().save(**kwargs)
+        phone = super().save(**kwargs)
 
         # Assuming the serializer's context comes with the `contact` object
         contact = self.context.get('contact')
-        self._validate_contact_phone(contact, instance, is_primary)
+        self._validate_contact_phone(contact, phone, is_primary)
 
         # Update or create the `Phone` instance
         # that belongs to the `contact` object
         ContactPhone.objects.update_or_create(
             contact=contact,
-            phone=instance,
+            phone=phone,
             defaults={'is_primary': is_primary}
         )
 
-        # Attach the `is_primary` value to the `self` instance
-        setattr(instance, 'is_primary', is_primary)
-        return instance
+        # New `Phone` object is created, setting the `is_primary` attribute
+        # is required to be serialized in the API response
+        setattr(phone, 'is_primary', is_primary)
+        return phone
 
     def _validate_contact_phone(self, contact, phone, is_primary) -> None:
         try:
@@ -237,6 +252,9 @@ class ContactOfContactDeserializer(serializers.Serializer):
         contact = self.context.get('contact')
         contact.contacts.add(new_contact, through_defaults={'starred': starred})
 
+        # New `Contact` successfully added to the `contact` list,
+        # setting the `starred` attribute is required to be serialized in the API response
+        setattr(new_contact, 'starred', starred)
         return new_contact
 
 
@@ -388,6 +406,7 @@ class ContactGroupDeserializer(serializers.Serializer):
         group = self.context.get('group')
         group.contacts.add(contact, through_defaults={'role': role, 'inviter': inviter})
 
+        # Prefetch additional data of the newly created contact
         return group.get_contacts().get(id=contact.id)
 
     def update(self, instance, validated_data):
@@ -399,4 +418,5 @@ class ContactGroupDeserializer(serializers.Serializer):
         group = self.context.get('group')
         ContactGroup.objects.filter(contact=instance, group=group).update(role=role)
 
+        # Prefetch additional data of the newly updated contact
         return group.get_contacts().get(id=instance.id)

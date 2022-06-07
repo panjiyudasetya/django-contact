@@ -15,7 +15,7 @@ class PhoneQuerySet(models.QuerySet):
         This method annotates the `self` queryset with the `is_primary` attribute
         taken from the `ContactPhone`.
         """
-        return self.annotate(starred=F('contactphone__is_primary'))
+        return self.annotate(is_primary=F('contactphone__is_primary'))
 
 
 class Phone(models.Model):
