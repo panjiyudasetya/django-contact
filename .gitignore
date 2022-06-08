@@ -141,4 +141,4 @@ media/
 .vscode
 
 # Re-use application package
-test_project/django_contact/*
+test_project/django_contact*
