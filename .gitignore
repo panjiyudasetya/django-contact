@@ -109,6 +109,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.sh
 
 # Spyder project settings
 .spyderproject
@@ -127,3 +128,17 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Database directory and app media files
+data/
+postgres-data/
+media/
+
+*.png
+.DS_Store
+
+# VS Code settings
+.vscode
+
+# Re-use application package
+test_project/django_contact*
