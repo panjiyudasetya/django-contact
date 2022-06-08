@@ -9,7 +9,10 @@ from django_contact.models import (
     Contact,
     Group
 )
-from django_contact.permissions import IsGroupAdmin, IsGroupMember
+from django_contact.permissions import (
+    IsGroupAdmin,
+    IsGroupMember
+)
 from django_contact.serializers import (
     ContactSerializer,
     ContactDeserializer,
@@ -28,7 +31,13 @@ from django_contact.serializers import (
 class BaseContactView(rw_generics.GenericAPIView):
     read_serializer_class = ContactSerializer
     write_serializer_class = ContactDeserializer
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def get_permissions(self) -> List[permissions.BasePermission]:
+        if self.request.method == 'GET':
+            self.permission_classes = [permissions.IsAuthenticated]
+        else:
+            self.permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+        return super().get_permissions()
 
     def get_queryset(self):
         """
@@ -44,7 +53,7 @@ class ContactListView(
 ):
     """
     Interface:
-    - `GET /contacts/`: Get contact list.
+    - `GET /contacts/`: Get all contacts.
     - `POST /contacts/`: Create a new contact.
     """
     pass
@@ -171,7 +180,7 @@ class MyContactListView(
     """
     Interface:
     - `GET /contacts/me/contacts/`:
-      Get contact list belongs to the requester.
+      Get contact list belongs to the requester's contact list.
 
     - `POST /contacts/me/contacts/`:
       Create a new contact in the requester's contact list.
@@ -225,7 +234,7 @@ class GroupListView(
 ):
     """
     Interface:
-    - `GET /groups/`: Get contact groups that are accessible for the requester.
+    - `GET /groups/`: Get contact groups that are accessible to the requester.
     - `POST /groups/`: Create a new contact group.
     """
     pass
@@ -291,7 +300,7 @@ class ContactGroupView(
 ):
     """
     Interface:
-    - `GET /groups/{group_id}/contacts/`: Get contact list from the given group ID.
+    - `GET /groups/{group_id}/contacts/`: Get contact list in the given group ID.
     - `POST /groups/{group_id}/contacts/`: Add contact to the given contact group ID.
     """
     write_serializer_class = ContactGroupCreateDeserializer
