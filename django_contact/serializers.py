@@ -1,15 +1,12 @@
 from django.db import transaction
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from rest_framework.serializers import as_serializer_error
 from typing import Dict, List
 
 from django_contact.models import (
     Contact,
     Phone,
-    ContactPhone,
     Group,
     ContactGroup
 )
@@ -50,7 +47,7 @@ class ContactSerializer(serializers.ModelSerializer):
         # Please be carefull with this, it can cause the endpoint performance
         # extremely slow, because each object will execute 1 DB lookup query.
         else:
-            phone_numbers = obj.phone_numbers.all().annotate_is_primary()
+            phone_numbers = obj.phone_numbers.all()
 
         return [
             {
@@ -85,15 +82,15 @@ class ContactDeserializer(serializers.ModelSerializer):
             'address',
         )
 
-    def validate_user(self, value):
+    def validate_user(self, value) -> User:
         if Contact.objects.filter(user=value).exists():
             raise ValidationError(
-                'User ID {} has a contact list already.'.format(value.id),
+                'Contact for User ID {} is already exists.'.format(value.id),
                 code='invalid'
             )
         return value
 
-    def validate(self, attrs):
+    def validate(self, attrs) -> Dict:
         # Checks on create
         if not self.instance and not attrs.get('user'):
             raise ValidationError(
@@ -109,9 +106,18 @@ class ContactDeserializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class SerializerContactDefault:
+    requires_context = True
+
+    def __call__(self, serializer_field) -> Contact:
+        return serializer_field.context['contact']
+
+    def __repr__(self) -> str:
+        return '%s()' % self.__class__.__name__
+
+
 class PhoneSerializer(serializers.ModelSerializer):
     phone_number = serializers.SerializerMethodField()
-    # Assuming the `serializer.instance` comes with preselected `is_primary` field
     is_primary = serializers.BooleanField()
 
     class Meta:
@@ -133,60 +139,33 @@ class PhoneSerializer(serializers.ModelSerializer):
 
 
 class PhoneDeserializer(serializers.ModelSerializer):
+    contact = serializers.HiddenField(
+        default=SerializerContactDefault()
+    )
     is_primary = serializers.BooleanField(required=False)
 
     class Meta:
         model = Phone
         fields = (
+            'contact',
             'phone_number',
             'phone_type',
             'is_primary',
         )
 
-    @transaction.atomic
-    def save(self, **kwargs) -> Phone:
-        """
-        We override this method to update or create `ContactPhone` object
-        associated with the `Contact` and `Phone` instances.
-        """
-        is_primary = self.validated_data.pop('is_primary')
-        phone = super().save(**kwargs)
-
-        # Assuming the serializer's context comes with the `contact` object
-        contact = self.context.get('contact')
-        self._validate_contact_phone(contact, phone, is_primary)
-
-        # Update or create the `Phone` instance
-        # that belongs to the `contact` object
-        ContactPhone.objects.update_or_create(
-            contact=contact,
-            phone=phone,
-            defaults={'is_primary': is_primary}
-        )
-
-        # New `Phone` object is created, setting the `is_primary` attribute
-        # is required to be serialized in the API response
-        setattr(phone, 'is_primary', is_primary)
-        return phone
-
-    def _validate_contact_phone(self, contact, phone, is_primary) -> None:
-        try:
-            ContactPhone(
-                contact=contact,
-                phone=phone,
-                is_primary=is_primary
-            ).clean()
-        except DjangoValidationError as err:
-            raise ValidationError(detail=as_serializer_error(err))
+    def update(self, instance, validated_data) -> Phone:
+        # The `contact` attribute should never be modified
+        validated_data.pop('contact', None)
+        return super().update(instance, validated_data)
 
 
-class ContactOfContactSerializer(serializers.ModelSerializer):
+class MyContactSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
     email = serializers.EmailField(source='user.email')
     phone_numbers = serializers.SerializerMethodField()
     # Assuming the `serializer.instance` comes with preselected `starred` field
-    starred = serializers.BooleanField()
+    starred = serializers.BooleanField(default=False)
 
     class Meta:
         model = Contact
@@ -200,9 +179,9 @@ class ContactOfContactSerializer(serializers.ModelSerializer):
             'title',
             'phone_numbers',
             'address',
+            'starred',
             'created_at',
             'updated_at',
-            'starred',
         )
         read_only_fields = fields
 
@@ -215,7 +194,7 @@ class ContactOfContactSerializer(serializers.ModelSerializer):
         # Please be carefull with this, it can cause the endpoint performance
         # extremely slow, because each object will execute 1 DB lookup query.
         else:
-            phone_numbers = obj.phone_numbers.all().annotate_is_primary()
+            phone_numbers = obj.phone_numbers.all()
 
         return [
             {
@@ -234,7 +213,7 @@ class ContactOfContactSerializer(serializers.ModelSerializer):
         ]
 
 
-class ContactOfContactDeserializer(serializers.Serializer):
+class MyContactDeserializer(serializers.Serializer):
     contact = serializers.PrimaryKeyRelatedField(
         queryset=Contact.objects.all()
     )
@@ -243,19 +222,33 @@ class ContactOfContactDeserializer(serializers.Serializer):
     class Meta:
         fields = ('contact', 'starred',)
 
+    def validate(self, attrs) -> Dict:
+        # On create's validations
+        if not self.instance:
+            contact = attrs['contact']
+
+            # Assuming the serializer's context comes with the `contact` object
+            user_contact = self.context['request'].user.contact
+            if user_contact.contacts.all().filter(id=contact.id).exists():
+                raise ValidationError(
+                    {'contact': 'Contact ID {} is already exists.'.format(contact.id)}
+                )
+
+        return super().validate(attrs)
+
     @transaction.atomic
     def create(self, validated_data) -> Contact:
-        new_contact = validated_data.get('contact')
+        contact = validated_data.get('contact')
         starred = validated_data.get('starred')
 
         # Assuming the serializer's context comes with the `contact` object
-        contact = self.context.get('contact')
-        contact.contacts.add(new_contact, through_defaults={'starred': starred})
+        user_contact = self.context['request'].user.contact
+        user_contact.contacts.add(contact, through_defaults={'starred': starred})
 
-        # New `Contact` successfully added to the `contact` list,
-        # setting the `starred` attribute is required to be serialized in the API response
-        setattr(new_contact, 'starred', starred)
-        return new_contact
+        # `Contact` successfully added to the `user_contact` list,
+        # Setting the `starred` attribute so that it can be serialized in the API response
+        setattr(contact, 'starred', starred)
+        return contact
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -283,39 +276,29 @@ class GroupDeserializer(serializers.ModelSerializer):
             'description',
         )
 
-    def validate(self, attrs):
-        user = self.context['request'].user
-
-        # Ensures the requester has a contact list
-        if not Contact.objects.filter(user=user).exists():
-            raise ValidationError(
-                'You don\'t have a contact list yet. Please create a new one.'
-            )
-
-        return super().validate(attrs)
-
     @transaction.atomic
-    def save(self, **kwargs) -> Group:
+    def create(self, validated_data):
         """
-        We override this method to set the (`Group.created_by`, `Group.updated_by`) fields
-        accordingly and add the group's creator as the group admin.
+        We override this method to set the `Group.created_by`
+        and add the group's creator as the group admin.
         """
         contact = self.context['request'].user.contact
-
-        # If update
-        if self.instance:
-            instance = super().save(updated_by=contact)
-        # If create
-        else:
-            instance = super().save(created_by=contact)
+        validated_data['created_by'] = contact
 
         # Add group's creator as an admin of that group
+        instance = super().create(validated_data)
         instance.contacts.add(
             contact,
             through_defaults={'role': ContactGroup.ROLE_ADMIN, 'inviter': contact}
         )
-
         return instance
+
+    def update(self, instance, validated_data):
+        """
+        We override this method to set the `Group.updated_by`.
+        """
+        validated_data['updated_by'] = self.context['request'].user.contact
+        return super().update(instance, validated_data)
 
 
 class ContactGroupSerializer(serializers.ModelSerializer):
@@ -359,7 +342,7 @@ class ContactGroupSerializer(serializers.ModelSerializer):
         # Please be carefull with this, it can cause the endpoint performance
         # extremely slow, because each object will execute 1 DB lookup query.
         else:
-            phone_numbers = obj.phone_numbers.all().annotate_is_primary()
+            phone_numbers = obj.phone_numbers.all()
 
         return [
             {
@@ -378,7 +361,18 @@ class ContactGroupSerializer(serializers.ModelSerializer):
         ]
 
 
-class ContactGroupDeserializer(serializers.Serializer):
+class SerializerGroupDefault:
+    requires_context = True
+
+    def __call__(self, serializer_field) -> Contact:
+        return serializer_field.context['group']
+
+    def __repr__(self) -> str:
+        return '%s()' % self.__class__.__name__
+
+
+class ContactGroupCreateDeserializer(serializers.Serializer):
+    group = serializers.HiddenField(default=SerializerGroupDefault())
     contact = serializers.PrimaryKeyRelatedField(
         queryset=Contact.objects.all()
     )
@@ -392,31 +386,40 @@ class ContactGroupDeserializer(serializers.Serializer):
     class Meta:
         fields = (
             'contact',
+            'group',
             'role',
             'inviter',
         )
 
-    @transaction.atomic
-    def create(self, validated_data) -> Contact:
+    def create(self, validated_data):
         contact = validated_data.get('contact')
-        role = validated_data.get('role')
-        inviter = validated_data.get('inviter')
 
         # Assuming the serializer's context comes with the `group` object
         group = self.context.get('group')
-        group.contacts.add(contact, through_defaults={'role': role, 'inviter': inviter})
+        group.contacts.add(
+            contact,
+            through_defaults={
+                'role': validated_data.get('role'),
+                'inviter': validated_data.get('inviter')
+            }
+        )
 
-        # Prefetch additional data of the newly created contact
-        return group.get_contacts().get(id=contact.id)
+        # Return that newly added contact with prefetched additional data.
+        return group.get_members().get(id=contact.id)
+
+
+class ContactGroupUpdateDeserializer(serializers.Serializer):
+    role = serializers.ChoiceField(
+        choices=ContactGroup.ROLE_CHOICES
+    )
+
+    class Meta:
+        fields = ('role',)
 
     def update(self, instance, validated_data):
-        # Preventive action (`contact`, `inviter`) fields
-        # should never be modified on update
-        role = validated_data.get('role')
-
         # Assuming the serializer's context comes with the `group` object
         group = self.context.get('group')
-        ContactGroup.objects.filter(contact=instance, group=group).update(role=role)
+        group.contactgroup_set.filter(contact=instance).update(**validated_data)
 
-        # Prefetch additional data of the newly updated contact
-        return group.get_contacts().get(id=instance.id)
+        # Return that newly updated contact with prefetched additional data.
+        return group.get_members().get(id=instance.id)

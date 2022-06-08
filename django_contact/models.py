@@ -8,53 +8,23 @@ from phonenumber_field.modelfields import PhoneNumberField
 User = get_user_model()
 
 
-class PhoneQuerySet(models.QuerySet):
-
-    def annotate_is_primary(self) -> models.QuerySet['Phone']:
-        """
-        This method annotates the `self` queryset with the `is_primary` attribute
-        taken from the `ContactPhone`.
-        """
-        return self.annotate(is_primary=F('contactphone__is_primary'))
-
-
-class Phone(models.Model):
-    phone_number = PhoneNumberField()
-
-    TYPE_CELLPHONE = "cellphone"
-    TYPE_TELEPHONE = "telephone"
-    TYPE_TELEFAX = "telefax"
-    PHONE_TYPE_CHOICES = (
-        (TYPE_CELLPHONE, 'Cellular phone'),
-        (TYPE_TELEPHONE, 'Telephone'),
-        (TYPE_TELEFAX, 'Facsimile'),
-    )
-    phone_type = models.CharField(
-        max_length=9,
-        choices=PHONE_TYPE_CHOICES
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    objects = PhoneQuerySet.as_manager()
-
-    class Meta:
-        unique_together = (
-            ('phone_number', 'phone_type'),
-        )
-
-
 class ContactQuerySet(models.QuerySet):
+
+    def in_common_groups_with(self, contact) -> models.QuerySet['Contact']:
+        """
+        This method narrows down the `self` queryset to the `Contact` instances
+        that are in the common groups with the given `contact`.
+        """
+        groups = contact.get_groups()
+        return self.filter(contactgroup__group__in=groups).distinct()
 
     def prefetch_phone_numbers(self) -> models.QuerySet['Contact']:
         """
         This method prefetches the `self` queryset with `phone_numbers` attribute.
         """
-        prefetch_phone_numbers = Prefetch(
-            'phone_numbers',
-            Phone.objects.all().annotate(is_primary=F('contactphone__is_primary'))
+        return self.prefetch_related(
+            Prefetch('phone_numbers', Phone.objects.all())
         )
-        return self.prefetch_related(prefetch_phone_numbers)
 
     def annotate_starred(self) -> models.QuerySet['Contact']:
         """
@@ -81,11 +51,6 @@ class Contact(models.Model):
         max_length=128,
         blank=True
     )
-    phone_numbers = models.ManyToManyField(
-        Phone,
-        through='ContactPhone',
-        through_fields=('contact', 'phone')
-    )
     address = models.CharField(
         max_length=256,
         blank=True
@@ -100,12 +65,18 @@ class Contact(models.Model):
 
     objects = ContactQuerySet.as_manager()
 
+    def get_groups(self):
+        """
+        Returns `Group` instances that are accessible for the `self` instance.
+        """
+        return Group.objects.accessible_for(self)
+
 
 class ContactMembership(models.Model):
     owner = models.ForeignKey(
         Contact,
         on_delete=models.CASCADE,
-        related_name='contact_of'
+        related_name='membership_as_owner'
     )
     contact = models.ForeignKey(
         Contact,
@@ -114,20 +85,34 @@ class ContactMembership(models.Model):
     starred = models.BooleanField(default=False)
 
 
-class ContactPhone(models.Model):
+class Phone(models.Model):
     contact = models.ForeignKey(
         Contact,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        related_name='phone_numbers'
     )
-    phone = models.ForeignKey(
-        Phone,
-        on_delete=models.CASCADE
+    phone_number = PhoneNumberField()
+
+    TYPE_CELLPHONE = "cellphone"
+    TYPE_TELEPHONE = "telephone"
+    TYPE_TELEFAX = "telefax"
+    PHONE_TYPE_CHOICES = (
+        (TYPE_CELLPHONE, 'Cellular phone'),
+        (TYPE_TELEPHONE, 'Telephone'),
+        (TYPE_TELEFAX, 'Facsimile'),
     )
+    phone_type = models.CharField(
+        max_length=9,
+        choices=PHONE_TYPE_CHOICES
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     is_primary = models.BooleanField(default=False)
 
     class Meta:
         unique_together = (
-            ('contact', 'phone'),
+            ('contact', 'phone_number'),
+            ('contact', 'phone_number', 'phone_type'),
         )
 
     def clean(self) -> None:
@@ -140,10 +125,7 @@ class ContactPhone(models.Model):
         """
         Return `True` if the `self.contact` has primary phone already.
         """
-        return ContactPhone.objects.filter(
-            contact_id=self.contact_id,
-            is_primary=True
-        ).exists()
+        return Phone.objects.filter(contact_id=self.contact_id, is_primary=True).exists()
 
 
 class GroupQuerySet(models.QuerySet):
@@ -207,7 +189,7 @@ class Group(models.Model):
             contact=contact
         ).exists()
 
-    def get_contacts(self) -> models.QuerySet['Contact']:
+    def get_members(self) -> models.QuerySet['Contact']:
         """
         Returns `Contact` instances that are currenlty member of the `self` instance
         with annotated (`role`, `inviter`, `joined_at`).
@@ -215,7 +197,8 @@ class Group(models.Model):
         Those annotated attributes are taken from the `ContactGroup`.
         """
 
-        return self.contacts.all().prefetch_phone_numbers()\
+        return self.contacts.all()\
+            .prefetch_phone_numbers()\
             .annotate(role=F('contactgroup__role'))\
             .annotate(invited_by=F('contactgroup__inviter'))\
             .annotate(joined_at=F('contactgroup__joined_at'))\

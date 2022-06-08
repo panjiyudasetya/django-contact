@@ -1,33 +1,38 @@
+from django.db.models import QuerySet
 from django.http import Http404
 from drf_rw_serializers import generics as rw_generics
-from rest_framework import status, generics
+from rest_framework import status, generics, permissions
 from rest_framework.response import Response
+from typing import Dict, List
 
 from django_contact.models import (
     Contact,
     Group
 )
+from django_contact.permissions import IsGroupAdmin, IsGroupMember
 from django_contact.serializers import (
     ContactSerializer,
     ContactDeserializer,
-    ContactOfContactSerializer,
-    ContactOfContactDeserializer,
     PhoneSerializer,
     PhoneDeserializer,
+    MyContactSerializer,
+    MyContactDeserializer,
     GroupSerializer,
     GroupDeserializer,
     ContactGroupSerializer,
-    ContactGroupDeserializer,
+    ContactGroupCreateDeserializer,
+    ContactGroupUpdateDeserializer,
 )
 
 
 class BaseContactView(rw_generics.GenericAPIView):
     read_serializer_class = ContactSerializer
     write_serializer_class = ContactDeserializer
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
 
     def get_queryset(self):
         """
-        Returns all `Contact` instances with prefetched `phone_numbers`.
+        Returns all `Contact` instances with prefetched phone numbers.
         """
         return Contact.objects.all().prefetch_phone_numbers().order_by('id')
 
@@ -60,42 +65,43 @@ class ContactDetailView(
     pass
 
 
-class BaseContactPhoneNumberView(rw_generics.GenericAPIView):
+class BasePhoneView(rw_generics.GenericAPIView):
     read_serializer_class = PhoneSerializer
     write_serializer_class = PhoneDeserializer
+    permission_classes = [permissions. IsAuthenticated, permissions.IsAdminUser]
 
-    def get_serializer_context(self):
+    def get_contact(self) -> Contact:
+        """
+        Return `Contact` object belongs to the given contact ID.
+        """
+        try:
+            return Contact.objects.get(user=self.kwargs['contact_id'])
+        except Contact.DoesNotExist:
+            raise Http404
+
+    def get_queryset(self) -> QuerySet[Contact]:
+        """
+        Returns `Phone` instances belongs to the given contact ID
+        with annotated `is_primary` data.
+        """
+        contact = self.get_contact()
+        return contact.phone_numbers.all().order_by('id')
+
+    def get_serializer_context(self) -> Dict:
         """
         We override this method because the write serializer class
         expecting `Contact` object of the given contact ID.
         """
         if self.request.method in ['POST', 'PUT', 'PATCH']:
-            try:
-                contact = Contact.objects.get(id=self.kwargs['contact_id'])
-            except Contact.DoesNotExist:
-                raise Http404
-
             context = super().get_serializer_context()
-            context.update({'contact': contact})
+            context.update({'contact': self.get_contact()})
             return context
 
         return super().get_serializer_context()
 
-    def get_queryset(self):
-        """
-        Returns `Phone` instances belongs to the given contact ID
-        with annotated `is_primary` data.
-        """
-        try:
-            contact = Contact.objects.get(id=self.kwargs['contact_id'])
-        except Contact.DoesNotExist:
-            raise Http404
 
-        return contact.phone_numbers.all().annotate_is_primary().order_by('id')
-
-
-class ContactPhoneNumberListView(
-    BaseContactPhoneNumberView,
+class PhoneListView(
+    BasePhoneView,
     rw_generics.CreateAPIView
 ):
     """
@@ -106,8 +112,8 @@ class ContactPhoneNumberListView(
     pass
 
 
-class ContactPhoneNumberDetailView(
-    BaseContactPhoneNumberView,
+class PhoneDetailView(
+    BasePhoneView,
     rw_generics.UpdateAPIView,
     generics.DestroyAPIView
 ):
@@ -122,82 +128,77 @@ class ContactPhoneNumberDetailView(
     pass
 
 
-class BaseContactOfContactView(rw_generics.GenericAPIView):
-    read_serializer_class = ContactOfContactSerializer
-    write_serializer_class = ContactOfContactDeserializer
+class BaseMyContactView(rw_generics.GenericAPIView):
+    read_serializer_class = MyContactSerializer
+    write_serializer_class = MyContactDeserializer
 
-    def get_serializer_context(self):
+    def get_my_contact(self) -> Contact:
+        """
+        Return `Contact` object belongs to the requester.
+        """
+        try:
+            return Contact.objects.get(user=self.request.user)
+        except Contact.DoesNotExist:
+            raise Http404
+
+    def get_queryset(self) -> QuerySet[Contact]:
+        """
+        Returns `Contact` instances belongs to the requester
+        with prefetched `phone_numbers` and annotated `starred` data.
+        """
+        contact = self.get_my_contact()
+        return contact.contacts.all().prefetch_phone_numbers()\
+            .annotate_starred().order_by('id')
+
+    def get_serializer_context(self) -> Dict:
         """
         We override this method because the write serializer class
-        expecting `Contact` object of the given contact ID.
+        expecting `Contact` object of the requester.
         """
         if self.request.method in ['POST', 'PUT', 'PATCH']:
-            try:
-                contact = Contact.objects.get(id=self.kwargs['contact_id'])
-            except Contact.DoesNotExist:
-                raise Http404
-
             context = super().get_serializer_context()
-            context.update({'contact': contact})
+            context.update({'contact': self.get_my_contact()})
             return context
 
         return super().get_serializer_context()
 
-    def get_queryset(self):
-        """
-        Returns `Contact` instances belongs to the given contact ID
-        with prefetched `phone_numbers` and annotated `starred` data.
-        """
-        try:
-            contact = Contact.objects.get(id=self.kwargs['contact_id'])
-        except Contact.DoesNotExist:
-            raise Http404
 
-        return contact.contacts.all().prefetch_phone_numbers()\
-            .annotate_starred().order_by('id')
-
-
-class ContactOfContactListView(
-    BaseContactOfContactView,
+class MyContactListView(
+    BaseMyContactView,
     rw_generics.ListAPIView,
     rw_generics.CreateAPIView
 ):
     """
     Interface:
-    - `GET /contacts/{contact_id}/contact-list/`:
-      Get contact list belongs to the given contact ID.
+    - `GET /contacts/me/contacts/`:
+      Get contact list belongs to the requester.
 
-    - `POST /contacts/{contact_id}/contact-list/`:
-      Create a new contact in the contact list of the given contact ID.
+    - `POST /contacts/me/contacts/`:
+      Create a new contact in the requester's contact list.
     """
     pass
 
 
-class ContactOfContactDetailView(
-    BaseContactOfContactView,
+class MyContactDetailView(
+    BaseMyContactView,
     rw_generics.RetrieveAPIView,
     generics.DestroyAPIView
 ):
     """
     Interface:
-    - `GET /contacts/{contact_id}/contact-list/{pk}/`:
-      Retrieve contact from the contact list of the given contact ID.
+    - `GET /contacts/me/contacts/{pk}/`:
+      Retrieve contact from the requester's contact list.
 
-    - `DELETE /contacts/{contact_id}/contact-list/{pk}/`:
-      Delete contact from the contact list of the given contact ID.
+    - `DELETE /contacts/me/contacts/{pk}/`:
+      Delete contact from the requester's contact list.
     """
-    serializer_class = ContactOfContactSerializer
 
-    def perform_destroy(self, instance):
+    def perform_destroy(self, instance) -> Response:
         """
         We override this method to delete that `instance`
-        from the contact list belongs the given contact ID
+        from the requester's contact list
         """
-        try:
-            contact = Contact.objects.get(id=self.kwargs['contact_id'])
-        except Contact.DoesNotExist:
-            raise Http404
-
+        contact = self.get_my_contact()
         contact.contacts.remove(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -206,15 +207,14 @@ class BaseGroupView(rw_generics.GenericAPIView):
     read_serializer_class = GroupSerializer
     write_serializer_class = GroupDeserializer
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Group]:
         """
-        Returns `Group` instances that are accessible for the given contact ID.
+        Returns `Group` instances that are accessible for the requester.
         """
         try:
             contact = Contact.objects.get(user=self.request.user)
         except Contact.DoesNotExist:
             raise Http404
-
         return Group.objects.accessible_for(contact).order_by('id')
 
 
@@ -248,47 +248,40 @@ class GroupDetailView(
 
 class BaseContactGroupView(rw_generics.GenericAPIView):
     read_serializer_class = ContactGroupSerializer
-    write_serializer_class = ContactGroupDeserializer
 
-    def get_serializer_context(self):
+    def get_group(self) -> Group:
         """
-        We override this method because the write serializer class
-        expecting `Group` object of the given group ID.
-        """
-        if self.request.method in ['POST', 'PUT', 'PATCH']:
-            try:
-                group = self.get_contact_groups().get(id=self.kwargs['group_id'])
-            except Group.DoesNotExist:
-                raise Http404
-
-            context = super().get_serializer_context()
-            context.update({'group': group})
-            return context
-
-        return super().get_serializer_context()
-
-    def get_contact_groups(self):
-        """
-        Returns `Group` instances that are accessible for the given contact ID.
+        Return `Group` object of the specific ID given in the URL
+        from the requester's `Group` objects.
         """
         try:
             contact = Contact.objects.get(user=self.request.user)
         except Contact.DoesNotExist:
             raise Http404
 
-        return Group.objects.accessible_for(contact).order_by('id')
-
-    def get_queryset(self):
-        """
-        Returns `Contact` instances that are currently member of the given group ID.
-        """
-        groups = self.get_contact_groups()
         try:
-            group = groups.get(id=self.kwargs['group_id'])
+            return Group.objects.accessible_for(contact).get(id=self.kwargs['group_id'])
         except Group.DoesNotExist:
             raise Http404
 
-        return group.get_contacts()
+    def get_queryset(self) -> QuerySet[Contact]:
+        """
+        Returns `Contact` instances that are currently member of the given group ID.
+        """
+        group = self.get_group()
+        return group.get_members()
+
+    def get_serializer_context(self) -> Dict:
+        """
+        We override this method because the write serializer class
+        expecting `Group` object of the given group ID.
+        """
+        if self.request.method in ['POST', 'PUT', 'PATCH']:
+            context = super().get_serializer_context()
+            context.update({'group': self.get_group()})
+            return context
+
+        return super().get_serializer_context()
 
 
 class ContactGroupView(
@@ -301,7 +294,7 @@ class ContactGroupView(
     - `GET /groups/{group_id}/contacts/`: Get contact list from the given group ID.
     - `POST /groups/{group_id}/contacts/`: Add contact to the given contact group ID.
     """
-    pass
+    write_serializer_class = ContactGroupCreateDeserializer
 
 
 class ContactGroupDetailView(
@@ -316,16 +309,20 @@ class ContactGroupDetailView(
     - `UPDATE /groups/{group_id}/contacts/{pk}/`: Update contact in the given contact group ID.
     - `DELETE /groups/{group_id}/contacts/{pk}/`: Delete contact from the given contact group ID.
     """
+    write_serializer_class = ContactGroupUpdateDeserializer
 
-    def perform_destroy(self, instance):
+    def get_permissions(self) -> List[permissions.BasePermission]:
+        if self.request.method in ['PUT', 'PATCH', 'DELETE']:
+            self.permission_classes = [permissions.IsAuthenticated, IsGroupAdmin]
+        else:
+            self.permission_classes = [permissions.IsAuthenticated, IsGroupMember]
+        return super().get_permissions()
+
+    def perform_destroy(self, instance) -> Response:
         """
         We override this method to delete that `instance`
         from the the given contact group ID
         """
-        try:
-            group = super().get_contact_groups().get(id=self.kwargs['group_id'])
-        except Group.DoesNotExist:
-            raise Http404
-
+        group = self.get_group()
         group.contacts.remove(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)

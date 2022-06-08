@@ -6,7 +6,7 @@ from django.contrib.admin import (
 )
 from django.forms import ModelForm
 
-from .models import (
+from django_contact.models import (
     Contact,
     ContactMembership
 )
@@ -29,7 +29,6 @@ class ContactForm(ModelForm):
         fields = (
             'user',
             'nickname',
-            'phone_numbers',
             'company',
             'title',
             'address',
