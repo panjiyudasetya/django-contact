@@ -106,7 +106,7 @@ class ContactDeserializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class SerializerContactDefault:
+class ContactDefaultFromContext:
     requires_context = True
 
     def __call__(self, serializer_field) -> Contact:
@@ -140,7 +140,7 @@ class PhoneSerializer(serializers.ModelSerializer):
 
 class PhoneDeserializer(serializers.ModelSerializer):
     contact = serializers.HiddenField(
-        default=SerializerContactDefault()
+        default=ContactDefaultFromContext()
     )
     is_primary = serializers.BooleanField(required=False)
 
@@ -213,7 +213,7 @@ class MyContactSerializer(serializers.ModelSerializer):
         ]
 
 
-class MyContactDeserializer(serializers.Serializer):
+class MyContactCreateDeserializer(serializers.Serializer):
     contact = serializers.PrimaryKeyRelatedField(
         queryset=Contact.objects.all()
     )
@@ -223,32 +223,38 @@ class MyContactDeserializer(serializers.Serializer):
         fields = ('contact', 'starred',)
 
     def validate(self, attrs) -> Dict:
-        # On create's validations
-        if not self.instance:
-            contact = attrs['contact']
+        contact = attrs['contact']
+        user_contact = self.context['request'].user.contact
 
-            # Assuming the serializer's context comes with the `contact` object
-            user_contact = self.context['request'].user.contact
-            if user_contact.contacts.all().filter(id=contact.id).exists():
-                raise ValidationError(
-                    {'contact': 'Contact ID {} is already exists.'.format(contact.id)}
-                )
+        if user_contact.contacts.all().filter(id=contact.id).exists():
+            raise ValidationError(
+                {'contact': 'Contact ID {} is already exists.'.format(contact.id)}
+            )
 
         return super().validate(attrs)
 
-    @transaction.atomic
     def create(self, validated_data) -> Contact:
         contact = validated_data.get('contact')
         starred = validated_data.get('starred')
 
-        # Assuming the serializer's context comes with the `contact` object
         user_contact = self.context['request'].user.contact
         user_contact.contacts.add(contact, through_defaults={'starred': starred})
 
-        # `Contact` successfully added to the `user_contact` list,
-        # Setting the `starred` attribute so that it can be serialized in the API response
-        setattr(contact, 'starred', starred)
         return contact
+
+
+class MyContactUpdateDeserializer(serializers.Serializer):
+    starred = serializers.BooleanField()
+
+    class Meta:
+        fields = ('starred',)
+
+    def update(self, instance, validated_data) -> Contact:
+        user_contact = self.context['request'].user.contact
+        user_contact.contactmembership_set.filter(contact=instance)\
+            .update(starred=validated_data.get('starred'))
+
+        return instance
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -361,7 +367,7 @@ class ContactGroupSerializer(serializers.ModelSerializer):
         ]
 
 
-class SerializerGroupDefault:
+class GroupDefaultFromContext:
     requires_context = True
 
     def __call__(self, serializer_field) -> Contact:
@@ -372,7 +378,7 @@ class SerializerGroupDefault:
 
 
 class ContactGroupCreateDeserializer(serializers.Serializer):
-    group = serializers.HiddenField(default=SerializerGroupDefault())
+    group = serializers.HiddenField(default=GroupDefaultFromContext())
     contact = serializers.PrimaryKeyRelatedField(
         queryset=Contact.objects.all()
     )
@@ -394,8 +400,7 @@ class ContactGroupCreateDeserializer(serializers.Serializer):
     def create(self, validated_data):
         contact = validated_data.get('contact')
 
-        # Assuming the serializer's context comes with the `group` object
-        group = self.context.get('group')
+        group = validated_data.get('group')
         group.contacts.add(
             contact,
             through_defaults={
@@ -404,8 +409,7 @@ class ContactGroupCreateDeserializer(serializers.Serializer):
             }
         )
 
-        # Return that newly added contact with prefetched additional data.
-        return group.get_members().get(id=contact.id)
+        return contact
 
 
 class ContactGroupUpdateDeserializer(serializers.Serializer):
@@ -422,4 +426,4 @@ class ContactGroupUpdateDeserializer(serializers.Serializer):
         group.contactgroup_set.filter(contact=instance).update(**validated_data)
 
         # Return that newly updated contact with prefetched additional data.
-        return group.get_members().get(id=instance.id)
+        return instance
