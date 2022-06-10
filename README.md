@@ -10,33 +10,42 @@ This is a simple API to view and manage the contact list of the Django User defa
 <br/>
 
 <p align = "center">
-<img src="https://user-images.githubusercontent.com/21379421/172562459-f4e8370e-fd92-4a71-b713-0973fe488a6c.png">
+<img src="https://user-images.githubusercontent.com/21379421/172641711-ffa80bbc-0e89-481d-ba0d-81f602394cbe.png">
 </p>
 <p align = "center">
-<b><i>Figure 1 - Entity relationship between (Contact, Phone) and (Contact, Contact Membership)</i></b>
+<b><i>Figure 1 - Contact-to-Contact relationship</i></b>
 </p>
 
 ---
+<br/><br/>
 
 <p align = "center">
-<img src="https://user-images.githubusercontent.com/21379421/172562482-efd321a6-0eeb-4da2-8720-82a26f1449dc.png">
+<img src="https://user-images.githubusercontent.com/21379421/172641745-ef3005d0-965d-46d2-8600-6cd723ac1839.png">
 </p>
 <p align = "center">
-<b><i>Figure 2 - Entity relationship between (Contact, Group) and (Group, Group Membership)</i></b>
+<b><i>Figure 2 - Contact-to-Phone relationship</i></b>
+</p>
+
+---
+<br/>
+
+<p align = "center">
+<img src="https://user-images.githubusercontent.com/21379421/172641797-5b73dfcc-ac64-4fdf-a757-943deb4f64fe.png">
+</p>
+<p align = "center">
+<b><i>Figure 3 - Contact-to-Group Relationship</i></b>
 </p>
 
 ## How to run the test project
 - Open your terminal.
 - Navigate to the `django-contact` directory.
 - Setup python [virtual environment](https://docs.python.org/3/tutorial/venv.html#creating-virtual-environments) and then activate it.
+- Copy-paste `/scripts/.env.sh.template` in the same directory, and then rename it as `.env.sh`.
+- Modify the IP Address of your local `SERVER` and its `PORT` number when necessary.
 - Run `./scripts/run-project.sh`
 
 # API Design
 This section describes endpoint designs that are applicable for users with a specific access level.
-
-## Authenticated User
-### Contacts
-- `GET /contacts/`: Get all contacts.
 
 ## Admin
 ### Contacts
@@ -85,9 +94,75 @@ This section describes endpoint designs that are applicable for users with a spe
   ```
 - `DELETE /contacts/<int:contact_id>/phone-numbers/<int:id>/`: Delete phone number of the given contact ID.
 
-## User
+## Authenticated User
+### Contacts
+- `GET /contacts/`: Get all contacts.<br/>
+  **Response**
+  ```
+   [
+     {
+        "id": 1,
+        "first_name": "User",
+        "last_name": "One",
+        "nickname": "",
+        "email": "user1@mail.com",
+        "company": "",
+        "title": "",
+        "phone_numbers": [
+            {
+                "id": 1,
+                "phone_number": {
+                    "value": 81222333444,
+                    "country_code": 62,
+                    "country_code_source": 1
+                },
+                "type": "cellphone",
+                "is_primary": true,
+                "created_at": "2022-06-08T07:18:28.477549Z",
+                "updated_at": "2022-06-08T07:18:28.477581Z"
+            }
+        ],
+        "address": "",
+        "created_at": "2022-06-08T07:17:11.255513Z",
+        "updated_at": "2022-06-08T07:17:11.255548Z"
+     }
+   ]
+  ```
+
 ### Contact Membership
-- `GET /contacts/me/contacts/`: Get contact list belongs to the requester's contact list.
+- `GET /contacts/me/contacts/`: Get contact list belongs to the requester's contact list.<br/>
+  **Response**
+  ```
+   [
+     {
+        "id": 1,
+        "first_name": "User",
+        "last_name": "One",
+        "nickname": "",
+        "email": "user1@mail.com",
+        "company": "",
+        "title": "",
+        "phone_numbers": [
+            {
+                "id": 1,
+                "phone_number": {
+                    "value": 81222333444,
+                    "country_code": 62,
+                    "country_code_source": 1
+                },
+                "type": "cellphone",
+                "is_primary": true,
+                "created_at": "2022-06-08T07:18:28.477549Z",
+                "updated_at": "2022-06-08T07:18:28.477581Z"
+            }
+        ],
+        "address": "",
+        "starred": false,
+        "created_at": "2022-06-08T07:17:11.255513Z",
+        "updated_at": "2022-06-08T07:17:11.255548Z"
+     }
+   ]
+  ```
 - `POST /contacts/me/contacts/`: Create a new contact in the requester's contact list.<br/>
   **Request Body**
   ```
@@ -100,7 +175,21 @@ This section describes endpoint designs that are applicable for users with a spe
 - `DELETE /contacts/me/contacts/<int:contact_id>/`:  Delete new contact from the requester's contact list.
 
 ### Contact Groups
-- `GET /groups/`: Get contact groups that are accessible to the requester.
+- `GET /groups/`: Get contact groups that are accessible to the requester.<br/>
+  **Response**
+  ```
+   [
+     {
+        "id": 1,
+        "name": "Test Group",
+        "description": "Description update",
+        "created_by": 1,
+        "created_at": "2022-06-08T07:21:16.195551Z",
+        "updated_by": 1,
+        "updated_at": "2022-06-10T02:50:08.397982Z"
+     }
+   ]
+  ```
 - `POST /groups/`: Create a new contact group.<br/>
   **Request Body**
   ```
@@ -121,7 +210,38 @@ This section describes endpoint designs that are applicable for users with a spe
 - `DELETE /groups/<int:id>/`: Delete contact group with specific ID.
 
 ### Contact Group Membership
-- `GET /groups/<int:group_id>/contacts/`: Get contact list in the given group ID.
+- `GET /groups/<int:group_id>/contacts/`: Get contact list in the given group ID.<br/>
+  **Response**
+  ```
+   [
+     {
+        "id": 1,
+        "first_name": "User",
+        "last_name": "One",
+        "nickname": "",
+        "email": "user1@mail.com",
+        "company": "",
+        "title": "",
+        "phone_numbers": [
+            {
+                "id": 1,
+                "phone_number": {
+                    "value": 81222333444,
+                    "country_code": 62,
+                    "country_code_source": 1
+                },
+                "type": "cellphone",
+                "is_primary": true,
+                "created_at": "2022-06-08T07:18:28.477549Z",
+                "updated_at": "2022-06-08T07:18:28.477581Z"
+            }
+        ],
+        "address": "",
+        "created_at": "2022-06-08T07:17:11.255513Z",
+        "updated_at": "2022-06-08T07:17:11.255548Z"
+     }
+   ]
+  ```
 - `POST /groups/<int:group_id>/contacts/`: Add contact to the given contact group ID.<br/>
   **Request Body**
   ```

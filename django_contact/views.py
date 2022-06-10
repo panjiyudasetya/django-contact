@@ -3,7 +3,8 @@ from django.http import Http404
 from drf_rw_serializers import generics as rw_generics
 from rest_framework import status, generics, permissions
 from rest_framework.response import Response
-from typing import Dict, List
+from rest_framework.serializers import Serializer as EmptySerializer
+from typing import Dict, List, Union
 
 from django_contact.models import (
     Contact,
@@ -19,7 +20,8 @@ from django_contact.serializers import (
     PhoneSerializer,
     PhoneDeserializer,
     MyContactSerializer,
-    MyContactDeserializer,
+    MyContactCreateDeserializer,
+    MyContactUpdateDeserializer,
     GroupSerializer,
     GroupDeserializer,
     ContactGroupSerializer,
@@ -138,8 +140,6 @@ class PhoneDetailView(
 
 
 class BaseMyContactView(rw_generics.GenericAPIView):
-    read_serializer_class = MyContactSerializer
-    write_serializer_class = MyContactDeserializer
 
     def get_my_contact(self) -> Contact:
         """
@@ -185,22 +185,37 @@ class MyContactListView(
     - `POST /contacts/me/contacts/`:
       Create a new contact in the requester's contact list.
     """
-    pass
+    write_serializer_class = MyContactCreateDeserializer
+
+    def get_read_serializer_class(self) -> Union[MyContactSerializer, EmptySerializer]:
+        if self.request.method == 'GET':
+            return MyContactSerializer
+
+        return EmptySerializer
 
 
 class MyContactDetailView(
     BaseMyContactView,
     rw_generics.RetrieveAPIView,
+    rw_generics.UpdateAPIView,
     generics.DestroyAPIView
 ):
     """
     Interface:
     - `GET /contacts/me/contacts/{pk}/`:
       Retrieve contact from the requester's contact list.
-
+    - `PUT /contacts/me/contacts/{pk}/`:
+      Set or unset starred contact in the requester's contact list.
     - `DELETE /contacts/me/contacts/{pk}/`:
       Delete contact from the requester's contact list.
     """
+    write_serializer_class = MyContactUpdateDeserializer
+
+    def get_read_serializer_class(self) -> Union[MyContactSerializer, EmptySerializer]:
+        if self.request.method == 'GET':
+            return MyContactSerializer
+
+        return EmptySerializer
 
     def perform_destroy(self, instance) -> Response:
         """
@@ -256,7 +271,6 @@ class GroupDetailView(
 
 
 class BaseContactGroupView(rw_generics.GenericAPIView):
-    read_serializer_class = ContactGroupSerializer
 
     def get_group(self) -> Group:
         """
@@ -305,6 +319,12 @@ class ContactGroupView(
     """
     write_serializer_class = ContactGroupCreateDeserializer
 
+    def get_read_serializer_class(self) -> Union[ContactGroupSerializer, EmptySerializer]:
+        if self.request.method == 'GET':
+            return ContactGroupSerializer
+
+        return EmptySerializer
+
 
 class ContactGroupDetailView(
     BaseContactGroupView,
@@ -319,6 +339,12 @@ class ContactGroupDetailView(
     - `DELETE /groups/{group_id}/contacts/{pk}/`: Delete contact from the given contact group ID.
     """
     write_serializer_class = ContactGroupUpdateDeserializer
+
+    def get_read_serializer_class(self) -> Union[ContactGroupSerializer, EmptySerializer]:
+        if self.request.method == 'GET':
+            return ContactGroupSerializer
+
+        return EmptySerializer
 
     def get_permissions(self) -> List[permissions.BasePermission]:
         if self.request.method in ['PUT', 'PATCH', 'DELETE']:
